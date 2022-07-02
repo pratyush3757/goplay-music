@@ -1,7 +1,8 @@
 import discord
 from discord.ext import commands
 
-BOT_OWNER = 687595131444133893
+with open("txts/owner.txt","r") as f:
+    BOT_OWNER = int(f.read())
 
 class Basics(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -17,7 +18,7 @@ class Basics(commands.Cog):
     async def _status(self, ctx: commands.Context):
         """Show bot commands status"""
         
-        with open("status.txt","r") as f:
+        with open("txts/status.txt","r") as f:
             f_status = f.read()
         embed = (discord.Embed(title = "Commands Status",
                                description = f"**How broken am I?**\n```{f_status}\n```",

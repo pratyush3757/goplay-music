@@ -3,10 +3,17 @@ import time
 import itertools
 import random
 import queue
+import logging
 
 from async_timeout import timeout
 from discord.ext import commands
 from .ytdl import *
+
+logger = logging.getLogger('discord.' + __name__)
+logger.setLevel(logging.INFO)
+
+error_message_lifetime = 30
+info_message_lifetime = None
 
 class SongQueue(asyncio.Queue):
     """An async queue for songs"""
@@ -31,8 +38,13 @@ class SongQueue(asyncio.Queue):
     def remove(self, index: int):
         del self._queue[index]
         
-    def appendleft(self, x):
-        self._queue.appendleft(x)
+    async def appendleft(self, x):
+        if self.qsize() == 0:   # Check added to signal the async queue.get() that something has been added
+                                # If we simply appendleft to an empty queue,
+                                # queue.get() doesn't get know that the queue now has entries
+            await self.put(x)
+        else:
+            self._queue.appendleft(x)
 
 class VoiceState:
     """Class defining a music player that uses a queue"""
@@ -98,68 +110,76 @@ class VoiceState:
     def is_loaded(self):
         return self.voice and self.current
     
-    async def push_queue_buffer(self, ctx: commands.Context, loop: asyncio.BaseEventLoop = None):
+    async def push_queuebuffer(self, ctx: commands.Context, loop: asyncio.BaseEventLoop = None, pushTopFlag: bool = False):
         start = time.time()
         while self.queuebuffer.qsize() > 0:
             item = self.queuebuffer.get()
-            await self.songs.put(item)
+            if pushTopFlag:
+                await self.songs.appendleft(item)
+            else:
+                await self.songs.put(item)
             #if isinstance(item, YTDLMetadata):      # Link's already been processed
                 #await self.songs.put(item)
             #elif isinstance(item, BasicMetadata):   # A basic metadata obj is in the buffer from a playlist
                 #await self.songs.put(item)
                 
-        self._bufferflag = False
+        #self._bufferflag = False
         end = time.time()
-        print(end-start)
-        await ctx.send(f"Took {end-start} seconds to push all songs into the queue")
+        logger.debug(f"Took {end-start} seconds to push all songs into the queue")
 
-    async def pushEntry(self, source, ctx: commands.Context, loop: asyncio.BaseEventLoop = None):
+    async def pushEntry(self, source, ctx: commands.Context, loop: asyncio.BaseEventLoop = None, pushTopFlag: bool = False):
         if isinstance(source, YTDLMetadata):
-            if not self.bufferflag:
+            if pushTopFlag:
+                await self.songs.appendleft(source)
+            else:       # Blocking new entries from entering the queue while pushing of buffer by 
+                        # Bufferflag method disabled considering speed of pushing 
+                        # the complete buffer to songqueue is fast enough.
                 await self.songs.put(source)
-            else:
-                self.queuebuffer.put(source)
+            #elif not self.bufferflag:
+                #await self.songs.put(source)
+            #else:
+                #self.queuebuffer.put(source)
         elif isinstance(source, list):
-            self.bufferflag = True
+            if pushTopFlag:
+                source = reversed(source)
+            #self.bufferflag = True
             for i in source:
                 self.queuebuffer.put(i)
-            await self.push_queue_buffer(ctx, loop)
+            await self.push_queuebuffer(ctx, loop, pushTopFlag)
 
     async def audio_player_task(self):
         while not self.bot.is_closed():
-            #print("playing songs now")
+            logger.info("Audio Player Initiated")
             self.next.clear()
             
-            #print("before loop")
             if True:
-                #print("into the loop")
                 # Try to get the next song within 3 minutes.
                 # If no song will be added to the queue in time,
                 # the player will disconnect due to performance
                 # reasons.
                 newsource = None
                 try:
-                    #print("trying")
+                    logger.debug("Waiting to play")
                     async with timeout(180): # 3 minutes
-                        #print("getting the song")
+                        logger.debug("Getting the song")
                         self.current = await self.songs.get()
-                        #print("Got the song")
+                        logger.debug("Got the song")
                         newsource = await YTDLSource.create_source(self.current.ctx, self.current.url, loop = self.bot.loop)
                         self.current = YTDLMetadata(newsource.ctx, newsource.data)
-                        #print("got the audiosource")
+                        logger.debug("Got the audiosource")
                         
                 except asyncio.TimeoutError as e:
-                    #print("timeout")
+                    logger.info("Timed out while waiting for song")
                     raise VoiceError(str(e))
                     return self.destroy(self._guild)
                 
-                #print("playing song")
+                logger.debug("Paying song")
                 self.voice.play(newsource.audio_source, after = lambda _: self.bot.loop.call_soon_threadsafe(self.next.set))
                 if self._send_embed == True:
-                    await self.current.channel.send(embed=self.current.create_embed())
+                    await self.current.channel.send(embed=self.current.create_embed(), delete_after = info_message_lifetime)
                 
                 await self.next.wait()
-                #print("done playing the song")
+                logger.debug("Done playing the song")
                 self.voice.stop()
                 self.current = None
                 newsource = None

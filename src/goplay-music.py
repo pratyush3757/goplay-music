@@ -11,7 +11,7 @@ logger.setLevel(logging.ERROR)
 logging.getLogger('discord.http').setLevel(logging.ERROR)
 
 handler = logging.handlers.RotatingFileHandler(
-    filename='discord.log',
+    filename='logs/discord.log',
     encoding='utf-8',
     maxBytes=16 * 1024 * 1024,  # 16 MiB
     backupCount=3,  # Rotate through 3 files
@@ -24,7 +24,7 @@ logger.addHandler(handler)
 
 initialExtensions = ['cogs.music.music', 'cogs.basics']
 
-with open("token.txt","r") as f:
+with open("txts/token.txt","r") as f:
     token = f.read()
 
 intents = discord.Intents.default()
@@ -37,12 +37,13 @@ client = commands.Bot(command_prefix=commands.when_mentioned_or(";"), intents=in
 @commands.check_any(commands.is_owner(), commands.has_any_role("Helpers", "Moderators", "Admins"))
 async def _reload(ctx: commands.Context, ext: str):
     """Reloads the specified module"""
+    
     if ext in ["music", "Music"]:
         await client.reload_extension('cogs.music.music')
         await ctx.send("Reloaded the music module!")
     elif ext in initialExtensions:
         await client.reload_extension(ext)
-        await ctx.send(f"Reloaded the {ext} module")
+        await ctx.send(f"Reloaded the {ext} module!")
 
 async def load_extensions():
     for extension in initialExtensions:

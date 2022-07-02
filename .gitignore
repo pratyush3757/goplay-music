@@ -1,7 +1,6 @@
 # Custom ignores
 .experimental/
-token.txt
-status.txt
+txts/
 logs/
 *.log.*
 
