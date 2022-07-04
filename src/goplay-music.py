@@ -45,6 +45,10 @@ async def _reload(ctx: commands.Context, ext: str):
         await client.reload_extension(ext)
         await ctx.send(f"Reloaded the {ext} module!")
 
+@client.event
+async def on_ready():
+    await client.change_presence(activity=discord.Game('with fire'))
+
 async def load_extensions():
     for extension in initialExtensions:
         await client.load_extension(extension)

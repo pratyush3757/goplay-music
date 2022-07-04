@@ -18,10 +18,13 @@ info_message_lifetime = None
 class SongQueue(asyncio.Queue):
     """An async queue for songs"""
     def __getitem__(self, item):
-        if isinstance(item, slice):
-            return list(itertools.islice(self._queue, item.start, item.stop, item.step))
-        else:
-            return self._queue[item]
+        try:
+            if isinstance(item, slice):
+                return list(itertools.islice(self._queue, item.start, item.stop, item.step))
+            else:
+                return self._queue[item]
+        except IndexError:
+            raise IndexError()
         
     def __iter__(self):
         return self._queue.__iter__()
@@ -36,8 +39,11 @@ class SongQueue(asyncio.Queue):
         random.shuffle(self._queue)
         
     def remove(self, index: int):
-        del self._queue[index]
-        
+        try:
+            del self._queue[index]
+        except IndexError:
+            raise IndexError()
+
     async def appendleft(self, x):
         if self.qsize() == 0:   # Check added to signal the async queue.get() that something has been added
                                 # If we simply appendleft to an empty queue,
@@ -45,6 +51,17 @@ class SongQueue(asyncio.Queue):
             await self.put(x)
         else:
             self._queue.appendleft(x)
+            
+    def move(self, old_idx: int, new_idx: int):
+        try:
+            item = self._queue[old_idx]
+            self.remove(old_idx)
+        except IndexError:
+            raise IndexError()
+        else:
+            if new_idx < 0:
+                new_idx = 0
+            self._queue.insert(new_idx, item)
 
 class VoiceState:
     """Class defining a music player that uses a queue"""
@@ -170,8 +187,8 @@ class VoiceState:
                         
                 except asyncio.TimeoutError as e:
                     logger.info("Timed out while waiting for song")
-                    raise VoiceError(str(e))
-                    return self.destroy(self._guild)
+                    #raise VoiceError(str(e))
+                    return self.destroy(self._ctx, self._guild)
                 
                 logger.debug("Paying song")
                 self.voice.play(newsource.audio_source, after = lambda _: self.bot.loop.call_soon_threadsafe(self.next.set))
@@ -184,9 +201,9 @@ class VoiceState:
                 self.current = None
                 newsource = None
         
-    def destroy(self, guild):
+    def destroy(self, ctx, guild):
         """Destroy and clean the player"""
-        return self.bot.loop.create_task(self._cog.cleanup(guild))
+        return self.bot.loop.create_task(self._cog.cleanup(ctx, guild))
 
     def play_next_song(self, error = None):
         if error:
