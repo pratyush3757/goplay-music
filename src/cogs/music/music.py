@@ -74,10 +74,12 @@ class Music(commands.Cog):
             self.error_count += 1
             additional_info = ""
             if self.error_count >= 3:
-                additional_info = "\nPlease ping the maintainer to look into this."
+                additional_info = "\nщ（ﾟДﾟщ）(╯°□°）╯︵ ┻━┻\nPlease ping the maintainer to look into this."
             
             logger.error(f"[Music Cog] Command error: {str(error)}", exc_info = True)
-            await self.send_error_embed(ctx, f"There has been an error.{additional_info}")
+            await self.send_error_embed(ctx,
+                                        title = "Command Error",
+                                        description = f"There has been an error.{additional_info}")
     
     async def cleanup(self, ctx, guild):
         try:
@@ -135,6 +137,20 @@ class Music(commands.Cog):
         await ctx.voice_state.stop()
         del self.voice_states[ctx.guild.id]
         
+    @commands.command(name='embeds')
+    async def _toggle_np_embed(self, ctx: commands.Context, value: str = None):
+        """Toggles nowplaying embeds or sets a given state"""
+        
+        if value == None:
+            value = ctx.voice_state.toggle_embed()
+        elif value in ['y', 'Y', 'T', 't', '1', 'on', 'ON', 'On']:
+            value = ctx.voice_state.toggle_embed(True)
+        elif value in ['n', 'N', 'F', 'f', '0', 'off', 'OFF', 'Off']:
+            value = ctx.voice_state.toggle_embed(False)
+        
+        msg = "on" if value else "off"
+        await self.send_info_embed(ctx, f"Now playing embeds have been turned {msg}.")
+        
     #@commands.command(name='volume', aliases=['vol'])
     #async def _volume(self, ctx: commands.Context, *, volume: int):
         #"""Changes the volume"""
@@ -162,13 +178,7 @@ class Music(commands.Cog):
             ctx.voice_state.voice.resume()
             await ctx.message.add_reaction('⏯')
             
-    @commands.command(name='clear', aliases=['cq'])
-    async def _clear_queue(self, ctx: commands.Context):
-        """Clears the queue"""
-        
-        ctx.voice_state.songs.clear()
-        
-    @commands.command(name='skip')
+    @commands.command(name='skip', aliases=['next'])
     async def _skip(self, ctx: commands.Context):
         """Skips song"""
         
@@ -176,14 +186,47 @@ class Music(commands.Cog):
             return await self.send_info_embed(ctx, f"Nothing is playing right now.")
             
         await ctx.message.add_reaction('⏭')
-        ctx.voice_state.skip()
+        ctx.voice_state.skip_song()
+        
+    @commands.command(name='skipto', aliases=['st'])
+    async def _skipto(self, ctx: commands.Context, index: int):
+        """Skips song to given queue number"""
+        
+        if not ctx.voice_state.is_loaded:
+            return await self.send_info_embed(ctx, f"Nothing is playing right now.")
+            
+        try:
+            await ctx.voice_state.skip_to_song(index)
+        except IndexError:
+            return await self.send_error_embed(ctx, f"Please check the index.")
+        except:
+            raise commands.CommandError(f'Skipto command has encountered an error.')
+        else:
+            await ctx.message.add_reaction('⏭')
+        
+    @commands.command(name='previous', aliases = ['prev'])
+    async def _previous(self, ctx: commands.Context):
+        """Playes the previous song"""
+        
+        if not ctx.voice_state.is_loaded:
+            return await self.send_info_embed(ctx, f"Nothing is playing right now.")
+        
+        if not ctx.voice_state.previous_playable:
+            return await self.send_error_embed(ctx, f"There is no song before the currently playing song.")
+        
+        try:
+            await ctx.voice_state.previous_song()
+        except IndexError:
+            return await self.send_error_embed(ctx, f"There was an error playing previous song.")
+        else:
+            await ctx.message.add_reaction('⏭')
         
     @commands.command(name='queue', aliases=['q', 'playlist', 'list'])
     async def _queue(self, ctx: commands.Context, *, page: int = 1):
         """Show the player's queue. 
         Can specify page to view. 10 entries per page"""
         
-        if len(ctx.voice_state.songs) == 0:
+        if ctx.voice_state.queue_empty:
             return await self.send_info_embed(ctx, f"The queue is empty.")
             
         items_per_page = 10
@@ -196,8 +239,30 @@ class Music(commands.Cog):
         for i, song in enumerate(ctx.voice_state.songs[start:end], start = start):
             queue += f"`{i+1}.` [**{song.title}**]({song.url})\n"
             
-        embed = discord.Embed(description = f"**{len(ctx.voice_state.songs)} tracks:**\n\n{queue}", 
+        embed = discord.Embed(description = f"**{len(ctx.voice_state.songs)} upcoming tracks:**\n\n{queue}", 
                                color = discord.Color.blurple()).set_footer(text = f"Viewing page {page}/{pages}")
+        await ctx.send(embed = embed, delete_after = info_message_lifetime)
+    
+    @commands.command(name='history', aliases=['hist'])
+    async def _hist(self, ctx: commands.Context, *, page: int = 1):
+        """Show the player's queue. 
+        Can specify page to view. 10 entries per page"""
+        
+        if len(ctx.voice_state.songs_history) == 0:
+            return await self.send_info_embed(ctx, f"The played queue is empty.")
+            
+        items_per_page = 10
+        pages = math.ceil(len(ctx.voice_state.songs_history)/items_per_page)
+        
+        start = (page - 1) * items_per_page
+        end = start + items_per_page
+        
+        queue = ''
+        for i, song in enumerate(ctx.voice_state.songs_history[start:end], start = start):
+            queue += f"`{i+1}.` [**{song.title}**]({song.url})\n"
+            
+        embed = discord.Embed(description = f"**{len(ctx.voice_state.songs_history)} tracks have been played:**\n\n{queue}", 
+                               color = discord.Color.green()).set_footer(text = f"Viewing page {page}/{pages}")
         await ctx.send(embed = embed, delete_after = info_message_lifetime)
     
     @commands.command(name='nowplaying', aliases=['np','now','current'])
@@ -212,35 +277,59 @@ class Music(commands.Cog):
     async def _shuffle(self, ctx: commands.Context):
         """Shuffles the queue"""
 
-        if len(ctx.voice_state.songs) == 0:
+        if ctx.voice_state.queue_empty:
             return await self.send_info_embed(ctx, f"The queue is empty.")
 
-        ctx.voice_state.songs.shuffle()
+        ctx.voice_state.shuffle_queue()
         await ctx.message.add_reaction('\N{Twisted Rightwards Arrows}')
     
     @commands.command(name='remove')
-    async def _remove(self, ctx: commands.Context, index: int):
-        """Removes a song from the queue at a given index"""
+    async def _remove(self, ctx: commands.Context, index: str = None):
+        """Removes a song from the queue at a given index or from a user"""
 
-        if len(ctx.voice_state.songs) == 0:
+        if ctx.voice_state.queue_empty:
             return await self.send_info_embed(ctx, f"The queue is empty.")
-
-        try:
-            ctx.voice_state.songs.remove(index - 1)
-        except IndexError:
-            return await self.send_error_embed(ctx, f"Please check the index.")
+        
+        if index == None:
+            return await self.send_error_embed(ctx, f"Please provide a song to remove.")
+        elif index.isdigit():
+            try:
+                ctx.voice_state.remove_song(int(index))
+            except IndexError:
+                return await self.send_error_embed(ctx, f"Please check the index.")
+            else:
+                await ctx.message.add_reaction('\N{White Heavy Check Mark}')
         else:
-            await ctx.message.add_reaction('\N{White Heavy Check Mark}')
-            
+            if len(ctx.message.mentions) == 0:
+                return await self.send_error_embed(ctx, f"Please provide a song to remove.")
+            else:
+                requesters_to_remove = []
+                for user_mentioned in ctx.message.mentions:
+                    requesters_to_remove.append(user_mentioned.id)
+                    
+                try:
+                    count = await ctx.voice_state.remove_requesters(requesters_to_remove)
+                    await self.send_info_embed(ctx, f"Removed {count} songs from the playlist.")
+                except:
+                    #await self.send_error_embed(ctx, f"There was an error in removing the songs")
+                    raise commands.CommandError()
+                    #await self.send_info_embed(ctx, f"{people} were mentioned.")
+                
+    @commands.command(name='clear', aliases=['cq'])
+    async def _clear_queue(self, ctx: commands.Context):
+        """Clears the queue"""
+        
+        ctx.voice_state.clear_queue()
+    
     @commands.command(name='move', aliases = ['mv'])
     async def _move(self, ctx: commands.Context, old_index: int, new_index: int):
         """Moves a song in queue to a given index"""
 
-        if len(ctx.voice_state.songs) == 0:
+        if ctx.voice_state.queue_empty:
             return await self.send_info_embed(ctx, f"The queue is empty.")
             
         try:
-            ctx.voice_state.songs.move(old_index - 1, new_index -1)
+            ctx.voice_state.move_song(old_index, new_index)
         except IndexError:
             return await self.send_error_embed(ctx, f"Please check the index.")
         else:
@@ -271,7 +360,7 @@ class Music(commands.Cog):
                 elif isinstance(source, list):
                     await self.send_info_embed(ctx, f"Enqueued {len(source)} songs.")
                     
-        await ctx.voice_state.pushEntry(source, ctx, loop = self.bot.loop, pushTopFlag = pushTopFlag)
+        await ctx.voice_state.push_entry(source, pushTopFlag = pushTopFlag)
         
     @commands.command(name='playtop', aliases=['pt'])
     async def _playtop(self, ctx: commands.Context, *, search: str):

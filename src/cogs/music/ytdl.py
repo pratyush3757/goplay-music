@@ -77,7 +77,7 @@ class BasicMetadata():
         self.title = title
 
     def __str__(self):
-        return f'**{self.title}** by **{self.uploader}**'
+        return f'**{self.title}** by **{self.url}**'
 
 class YTDLExtractorFlat():
     """Youtube_dl extractor for links and playlists"""

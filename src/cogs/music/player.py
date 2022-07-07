@@ -65,7 +65,7 @@ class SongQueue(asyncio.Queue):
 
 class VoiceState:
     """Class defining a music player that uses a queue"""
-    __slots__ = ('bot', '_ctx', '_guild', '_channel', '_cog', 'current', 'voice', 'next', 'songs', 'queuebuffer', '_bufferflag', '_loop', '_volume', '_send_embed', 'audio_player')
+    __slots__ = ('bot', '_ctx', '_guild', '_channel', '_cog', 'current', 'voice', 'next', 'songs', 'songs_history', 'queuebuffer', '_bufferflag', '_loop', '_volume', '_send_embed', 'audio_player')
     
     def __init__(self, bot: commands.Bot, ctx: commands.Context):
         self.bot = bot
@@ -78,6 +78,7 @@ class VoiceState:
         self.voice = None
         self.next = asyncio.Event()
         self.songs = SongQueue()
+        self.songs_history = SongQueue()
         self.queuebuffer = queue.Queue()
         
         self._bufferflag = False
@@ -127,7 +128,15 @@ class VoiceState:
     def is_loaded(self):
         return self.voice and self.current
     
-    async def push_queuebuffer(self, ctx: commands.Context, loop: asyncio.BaseEventLoop = None, pushTopFlag: bool = False):
+    @property
+    def queue_empty(self):
+        return len(self.songs) == 0
+    
+    @property
+    def previous_playable(self):
+        return len(self.songs_history) >= 2
+    
+    async def push_queuebuffer(self, pushTopFlag: bool = False):
         start = time.time()
         while self.queuebuffer.qsize() > 0:
             item = self.queuebuffer.get()
@@ -144,7 +153,7 @@ class VoiceState:
         end = time.time()
         logger.debug(f"Took {end-start} seconds to push all songs into the queue")
 
-    async def pushEntry(self, source, ctx: commands.Context, loop: asyncio.BaseEventLoop = None, pushTopFlag: bool = False):
+    async def push_entry(self, source, pushTopFlag: bool = False):
         if isinstance(source, YTDLMetadata):
             if pushTopFlag:
                 await self.songs.appendleft(source)
@@ -162,7 +171,7 @@ class VoiceState:
             #self.bufferflag = True
             for i in source:
                 self.queuebuffer.put(i)
-            await self.push_queuebuffer(ctx, loop, pushTopFlag)
+            await self.push_queuebuffer(pushTopFlag)
 
     async def audio_player_task(self):
         while not self.bot.is_closed():
@@ -190,33 +199,103 @@ class VoiceState:
                     #raise VoiceError(str(e))
                     return self.destroy(self._ctx, self._guild)
                 
-                logger.debug("Paying song")
+                logger.debug("Playing song")
                 self.voice.play(newsource.audio_source, after = lambda _: self.bot.loop.call_soon_threadsafe(self.next.set))
                 if self._send_embed == True:
                     await self.current.channel.send(embed=self.current.create_embed(), delete_after = info_message_lifetime)
                 
+                await self.songs_history.put(self.current)
                 await self.next.wait()
                 logger.debug("Done playing the song")
                 self.voice.stop()
                 self.current = None
                 newsource = None
-        
-    def destroy(self, ctx, guild):
-        """Destroy and clean the player"""
-        return self.bot.loop.create_task(self._cog.cleanup(ctx, guild))
-
-    def play_next_song(self, error = None):
-        if error:
-            raise VoiceError(str(error))
-        
-        self.next.set()
-        
-    def skip(self):
+    
+    def skip_song(self):
         if self.is_loaded:
             self.voice.stop() 
             # Causes the current stream to stop and the 
             # "after=" parameter in play function to be called
             
+    async def skip_to_song(self, index: int):
+        if len(self.songs) >= index:
+            try:
+                for i in range(index - 1):
+                    entry = self.songs[0]
+                    self.songs.remove(0)
+                    await self.songs_history.put(entry)
+                    logger.debug(f"pushed {str(entry)} to history")
+            except Exception as e:
+                logger.error(e)
+                raise
+            else:
+                self.skip_song()
+        else:
+            raise IndexError()
+        
+    async def previous_song(self):
+        if self.previous_playable:
+            try:
+                nowplaying_song = self.songs_history[-1]
+                prev_song = self.songs_history[-2]
+                self.songs_history.remove(-1) # Removing last 2 songs by using the last index for both
+                self.songs_history.remove(-1)
+            except IndexError:
+                raise IndexError()
+            else:
+                # Had to push both entries as a list instead of individually,
+                # it was having some weird async problem with the queue after using skipto command
+                # where after skipto, using previous caused nowplaying to repeat and the previous to be dropped from the queue.
+                # Maybe due to single entry push using queue.put() or some async desynchronization.
+                await self.push_entry([prev_song, nowplaying_song], pushTopFlag = True)
+                self.skip_song()
+        else:
+            raise IndexError()
+    
+    def shuffle_queue(self):
+        self.songs.shuffle()
+        
+    def remove_song(self, index: int):
+        return self.songs.remove(index - 1)
+        
+    async def remove_requesters(self, requesters_to_remove: list):
+        try:
+            # Block is equivalent to, but easier to understand than
+            # modified_playlist = [v for v in self.songs[:] if v.requester.id not in requesters_to_remove]
+            start = time.time()
+            modified_playlist = []
+            count = 0
+            for song in self.songs[:]:
+                if song.requester.id not in requesters_to_remove:
+                    modified_playlist.append(song)
+                else:
+                    count +=1
+            self.clear_queue()
+            await self.push_entry(modified_playlist)
+            end = time.time()
+            logger.debug(f"Took [{end-start}] seconds for complete operation")
+            return count
+        except Exception as e:
+            logger.error(e)
+            raise
+        
+    def clear_queue(self):
+        self.songs.clear()
+        
+    def move_song(self, old_idx: int, new_idx: int):
+        return self.songs.move(old_idx - 1, new_idx - 1)
+    
+    def toggle_embed(self, value: bool = None):
+        if value == None:
+            self.send_embed = not self.send_embed
+            return self.send_embed
+        self.send_embed = value
+        return value
+            
+    def destroy(self, ctx, guild):
+        """Destroy and clean the player"""
+        return self.bot.loop.create_task(self._cog.cleanup(ctx, guild))
+
     async def stop(self):
         self.songs.clear()
         

@@ -36,7 +36,7 @@ client = commands.Bot(command_prefix=commands.when_mentioned_or(";"), intents=in
 @client.command(name="reload")
 @commands.check_any(commands.is_owner(), commands.has_any_role("Helpers", "Moderators", "Admins"))
 async def _reload(ctx: commands.Context, ext: str):
-    """Reloads the specified module"""
+    """Reloads the specified module (Staff only)"""
     
     if ext in ["music", "Music"]:
         await client.reload_extension('cogs.music.music')

@@ -25,6 +25,15 @@ class Basics(commands.Cog):
                                color = discord.Color.gold())
                 .add_field(name = "Help",value= f"Ping <@{BOT_OWNER}> to fix something"))
         await ctx.send(embed = embed)
+        
+    @commands.command(name='afk', hidden = True)
+    async def _afk(self, ctx: commands.Context):
+        """Tell people you'll be right back"""
+        
+        embed = discord.Embed(title = f"{ctx.author.mention} says they're going away for a minute", 
+                              description = f"You can talk smack behind their back. Don't worry, I won't tell anybody ʘ‿ʘ",
+                              color = discord.Color.blurple())
+        await ctx.send(embed = embed)
 
 async def setup(bot):
     await bot.add_cog(Basics(bot))
