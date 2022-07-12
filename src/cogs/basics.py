@@ -30,7 +30,7 @@ class Basics(commands.Cog):
     async def _afk(self, ctx: commands.Context):
         """Tell people you'll be right back"""
         
-        embed = discord.Embed(title = f"{ctx.author.mention} says they're going away for a minute", 
+        embed = discord.Embed(title = f"{ctx.author.display_name} says they're going away for a minute", 
                               description = f"You can talk smack behind their back. Don't worry, I won't tell anybody ʘ‿ʘ",
                               color = discord.Color.blurple())
         await ctx.send(embed = embed)

@@ -11,7 +11,7 @@ from .player import VoiceState
 logger = logging.getLogger('discord.' + __name__)
 logger.setLevel(logging.DEBUG)
 
-error_message_lifetime = 30
+error_message_lifetime = None
 info_message_lifetime = None
 
 class Music(commands.Cog):
@@ -55,6 +55,7 @@ class Music(commands.Cog):
     async def cog_command_error(self, ctx: commands.Context, error: commands.CommandError):
         """Cog command errors handler"""
         # This prevents any commands with local handlers being handled here in on_command_error.
+        logger.error(f"[Music Cog] Command error: {str(error)}", exc_info = True)
         if hasattr(ctx.command, 'on_error'):
             return
         
@@ -76,7 +77,7 @@ class Music(commands.Cog):
             if self.error_count >= 3:
                 additional_info = "\nщ（ﾟДﾟщ）(╯°□°）╯︵ ┻━┻\nPlease ping the maintainer to look into this."
             
-            logger.error(f"[Music Cog] Command error: {str(error)}", exc_info = True)
+            #logger.error(f"[Music Cog] Command error: {str(error)}", exc_info = True)
             await self.send_error_embed(ctx,
                                         title = "Command Error",
                                         description = f"There has been an error.{additional_info}")
@@ -118,7 +119,7 @@ class Music(commands.Cog):
         # Check necessary to prevent multiple join invoke errors from play command
         voice_client = discord.utils.get(self.bot.voice_clients, guild = ctx.guild)
         if (not ctx.voice_state.voice) and voice_client:
-            ctx.voice_state.voice = ctx.voice_client.channel
+            ctx.voice_state.voice = ctx.voice_client
             return
         
         voice_channel = ctx.author.voice.channel
@@ -237,7 +238,7 @@ class Music(commands.Cog):
         
         queue = ''
         for i, song in enumerate(ctx.voice_state.songs[start:end], start = start):
-            queue += f"`{i+1}.` [**{song.title}**]({song.url})\n"
+            queue += f"`{i+1}.` [{song.title}]({song.url})\n"
             
         embed = discord.Embed(description = f"**{len(ctx.voice_state.songs)} upcoming tracks:**\n\n{queue}", 
                                color = discord.Color.blurple()).set_footer(text = f"Viewing page {page}/{pages}")
@@ -264,14 +265,39 @@ class Music(commands.Cog):
         embed = discord.Embed(description = f"**{len(ctx.voice_state.songs_history)} tracks have been played:**\n\n{queue}", 
                                color = discord.Color.green()).set_footer(text = f"Viewing page {page}/{pages}")
         await ctx.send(embed = embed, delete_after = info_message_lifetime)
+        
+    @commands.command(name='previnfo', aliases=['pi'])
+    async def _previnfo(self, ctx: commands.Context):
+        """Show info on previous song"""
+        
+        if not ctx.voice_state.is_loaded:
+            return await self.send_info_embed(ctx, f"Nothing is playing right now.")
+        if not ctx.voice_state.previous_playable:
+            return await self.send_error_embed(ctx, f"There is no song before the currently playing song.")
+        
+        _embed = await ctx.voice_state.prev_info_embed()
+        await ctx.send(embed = _embed, delete_after = info_message_lifetime)
     
     @commands.command(name='nowplaying', aliases=['np','now','current'])
     async def _nowplaying(self, ctx: commands.Context):
         """Show Now Playing"""
+        
         if not ctx.voice_state.is_loaded:
             return await self.send_info_embed(ctx, f"Nothing is playing right now.")
         
-        await ctx.send(embed=ctx.voice_state.current.create_embed(), delete_after = info_message_lifetime)
+        await ctx.send(embed = ctx.voice_state.current_info_embed(), delete_after = info_message_lifetime)
+        
+    @commands.command(name='nextinfo', aliases=['ni'])
+    async def _nextinfo(self, ctx: commands.Context):
+        """Show info on next song"""
+        
+        if not ctx.voice_state.is_loaded:
+            return await self.send_info_embed(ctx, f"Nothing is playing right now.")
+        elif ctx.voice_state.queue_empty:
+            return await self.send_info_embed(ctx, f"The queue is empty.")
+        
+        _embed = await ctx.voice_state.next_info_embed()
+        await ctx.send(embed = _embed, delete_after = info_message_lifetime)
         
     @commands.command(name='shuffle')
     async def _shuffle(self, ctx: commands.Context):
@@ -314,7 +340,34 @@ class Music(commands.Cog):
                     #await self.send_error_embed(ctx, f"There was an error in removing the songs")
                     raise commands.CommandError()
                     #await self.send_info_embed(ctx, f"{people} were mentioned.")
-                
+    
+    @commands.command(name='remdupes')
+    async def _remove_dupes(self, ctx: commands.Context):
+        """Removes duplicate songs from the queue"""
+
+        if ctx.voice_state.queue_empty:
+            return await self.send_info_embed(ctx, f"The queue is empty.")
+        
+        try:
+            count = await ctx.voice_state.remove_dupes()
+            await self.send_info_embed(ctx, f"Removed {count} songs from the playlist.")
+        except:
+            raise commands.CommandError()
+        
+    @commands.command(name='remabs')
+    async def _remove_absent(self, ctx: commands.Context):
+        """Removes songs requested by absent users"""
+
+        if ctx.voice_state.queue_empty:
+            return await self.send_info_embed(ctx, f"The queue is empty.")
+        
+        try:
+            present_members = ctx.voice_state.voice.channel.voice_states.keys()
+            count = await ctx.voice_state.remove_absent(present_members)
+            await self.send_info_embed(ctx, f"Removed {count} songs from the playlist.")
+        except:
+            raise commands.CommandError()
+    
     @commands.command(name='clear', aliases=['cq'])
     async def _clear_queue(self, ctx: commands.Context):
         """Clears the queue"""
@@ -386,6 +439,6 @@ class Music(commands.Cog):
         if not ctx.author.voice or not ctx.author.voice.channel:
             await self.send_error_embed(ctx, f"Please join a voice channel!")
             return False
-
+    
 async def setup(bot):
     await bot.add_cog(Music(bot))

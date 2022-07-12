@@ -10,9 +10,9 @@ from discord.ext import commands
 from .ytdl import *
 
 logger = logging.getLogger('discord.' + __name__)
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 
-error_message_lifetime = 30
+error_message_lifetime = None
 info_message_lifetime = None
 
 class SongQueue(asyncio.Queue):
@@ -252,6 +252,29 @@ class VoiceState:
         else:
             raise IndexError()
     
+    async def prev_info_embed(self):
+        if self.previous_playable:
+            song = self.songs_history[-2]
+            if isinstance(song, YTDLMetadata):
+                return song.create_embed()
+            else:
+                newsource = await YTDLSource.create_source(song.ctx, song.url, loop = self.bot.loop)
+                song = YTDLMetadata(newsource.ctx, newsource.data)
+                return song.create_embed()
+    
+    def current_info_embed(self):
+        return self.current.create_embed()
+    
+    async def next_info_embed(self):
+        if not self.queue_empty:
+            song = self.songs[0]
+            if isinstance(song, YTDLMetadata):
+                return song.create_embed()
+            else:
+                newsource = await YTDLSource.create_source(song.ctx, song.url, loop = self.bot.loop)
+                song = YTDLMetadata(newsource.ctx, newsource.data)
+                return song.create_embed()
+    
     def shuffle_queue(self):
         self.songs.shuffle()
         
@@ -260,7 +283,7 @@ class VoiceState:
         
     async def remove_requesters(self, requesters_to_remove: list):
         try:
-            # Block is equivalent to, but easier to understand than
+            # This code block is equivalent to, but easier to understand than
             # modified_playlist = [v for v in self.songs[:] if v.requester.id not in requesters_to_remove]
             start = time.time()
             modified_playlist = []
@@ -273,12 +296,54 @@ class VoiceState:
             self.clear_queue()
             await self.push_entry(modified_playlist)
             end = time.time()
-            logger.debug(f"Took [{end-start}] seconds for complete operation")
+            logger.debug(f"Took [{end-start}] seconds to remove requesters")
             return count
         except Exception as e:
             logger.error(e)
             raise
         
+    async def remove_dupes(self):
+        try:
+            start = time.time()
+            modified_playlist = []
+            count = 0
+            url_set = {}
+            for song in self.songs[:]:
+                if song.url not in url_set:
+                    modified_playlist.append(song)
+                    url_set.add(song.url)
+                else:
+                    count +=1
+            self.clear_queue()
+            await self.push_entry(modified_playlist)
+            end = time.time()
+            logger.debug(f"Took [{end-start}] seconds to remove dupes")
+            return count
+        except Exception as e:
+            logger.error(e)
+            raise
+    
+    async def remove_absent(self, present_members: list):
+        try:
+            # Block is equivalent to, but easier to understand than
+            # modified_playlist = [v for v in self.songs[:] if v.requester.id in present_members]
+            start = time.time()
+            modified_playlist = []
+            count = 0
+            for song in self.songs[:]:
+                if song.requester.id in present_members:
+                    modified_playlist.append(song)
+                else:
+                    count +=1
+            self.clear_queue()
+            await self.push_entry(modified_playlist)
+            end = time.time()
+            logger.debug(f"Took [{end-start}] seconds to remove songs by absent users")
+            return count
+        except Exception as e:
+            logger.error(e)
+            raise
+    
     def clear_queue(self):
         self.songs.clear()
         
@@ -295,7 +360,7 @@ class VoiceState:
     def destroy(self, ctx, guild):
         """Destroy and clean the player"""
         return self.bot.loop.create_task(self._cog.cleanup(ctx, guild))
-
+    
     async def stop(self):
         self.songs.clear()
         

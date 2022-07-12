@@ -7,8 +7,9 @@ from discord.ext import commands
 
 # Setting up Logger
 logger = logging.getLogger('discord')
-logger.setLevel(logging.ERROR)
+logger.setLevel(logging.DEBUG)
 logging.getLogger('discord.http').setLevel(logging.ERROR)
+logging.getLogger('discord.gateway').setLevel(logging.INFO)
 
 handler = logging.handlers.RotatingFileHandler(
     filename='logs/discord.log',

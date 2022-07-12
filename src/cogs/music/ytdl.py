@@ -6,7 +6,7 @@ import functools
 from discord.ext import commands
 
 # Suppress noise about console usage from errors
-yt_dlp.utils.bug_reports_message = lambda: ''
+#yt_dlp.utils.bug_reports_message = lambda: ''
 
 class VoiceError(Exception):
     pass
@@ -181,7 +181,7 @@ class YTDLSource():
     
     FFMPEG_OPTIONS = {
         'before_options':'-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-        'options': '-vn'
+        'options': '-vn -loglevel debug'
     }
     
     ytdl = yt_dlp.YoutubeDL(YTDL_FORMAT_OPTIONS)
