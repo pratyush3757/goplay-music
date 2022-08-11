@@ -6,7 +6,7 @@ import queue
 import logging
 
 from async_timeout import timeout
-from discord.ext import commands
+from discord.ext import commands, tasks
 from .ytdl import *
 
 logger = logging.getLogger('discord.' + __name__)
@@ -65,7 +65,7 @@ class SongQueue(asyncio.Queue):
 
 class VoiceState:
     """Class defining a music player that uses a queue"""
-    __slots__ = ('bot', '_ctx', '_guild', '_channel', '_cog', 'current', 'voice', 'next', 'songs', 'songs_history', 'queuebuffer', '_bufferflag', '_loop', '_volume', '_send_embed', 'audio_player')
+    #__slots__ = ('bot', '_ctx', '_guild', '_channel', '_cog', 'current', 'voice', 'next', 'songs', 'songs_history', 'queuebuffer', '_bufferflag', '_loop', '_volume', '_send_embed', 'audio_player')
     
     def __init__(self, bot: commands.Bot, ctx: commands.Context):
         self.bot = bot
@@ -86,10 +86,11 @@ class VoiceState:
         self._volume = 0.5
         self._send_embed = False
         
-        self.audio_player = ctx.bot.loop.create_task(self.audio_player_task())
+        #self.audio_player = ctx.bot.loop.create_task(self.audio_player_task())
+        self.audio_player = self.audio_player_task.start()
         
     def __del__(self):
-        self.audio_player.cancel()
+        self.audio_player_task.cancel()
         
     @property
     def bufferflag(self):
@@ -173,8 +174,10 @@ class VoiceState:
                 self.queuebuffer.put(i)
             await self.push_queuebuffer(pushTopFlag)
 
+    @tasks.loop()
     async def audio_player_task(self):
-        while not self.bot.is_closed():
+        #while not self.bot.is_closed():
+        if not self.bot.is_closed():
             logger.info("Audio Player Initiated")
             self.next.clear()
             
@@ -210,6 +213,10 @@ class VoiceState:
                 self.voice.stop()
                 self.current = None
                 newsource = None
+    
+    @audio_player_task.before_loop
+    async def before_audio_player(self):
+        await self.bot.wait_until_ready()
     
     def skip_song(self):
         if self.is_loaded:
@@ -360,6 +367,20 @@ class VoiceState:
     def destroy(self, ctx, guild):
         """Destroy and clean the player"""
         return self.bot.loop.create_task(self._cog.cleanup(ctx, guild))
+    
+    async def restart_player(self):
+        self.audio_player_task.cancel()
+        self.next.set()
+        try:
+            nowplaying_song = self.songs_history[-1]
+            self.songs_history.remove(-1)
+        except IndexError:
+            raise IndexError()
+        else:
+            await self.push_entry([nowplaying_song], pushTopFlag = True)
+        await asyncio.sleep(1)
+        self.audio_player_task.start()
+    
     
     async def stop(self):
         self.songs.clear()

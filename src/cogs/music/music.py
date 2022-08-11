@@ -421,6 +421,14 @@ class Music(commands.Cog):
         
         await self._play(ctx, search = search, pushTopFlag = True)
                 
+    @commands.command(name='restart')
+    async def _restart(self, ctx: commands.Context):
+        try:
+            await ctx.voice_state.restart_player()
+        except Exception as e:
+            logger.error(e)
+            await self.send_error_embed(ctx, f"There has been an error in restarting the player")
+    
     @_play.error
     @_playtop.error
     async def play_handler(self, ctx: commands.Context, error: commands.CommandError):
