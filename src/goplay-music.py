@@ -7,7 +7,7 @@ from discord.ext import commands
 
 # Setting up Logger
 logger = logging.getLogger('discord')
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 logging.getLogger('discord.http').setLevel(logging.ERROR)
 logging.getLogger('discord.gateway').setLevel(logging.INFO)
 

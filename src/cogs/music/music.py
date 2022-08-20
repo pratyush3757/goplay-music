@@ -197,6 +197,7 @@ class Music(commands.Cog):
             return await self.send_info_embed(ctx, f"Nothing is playing right now.")
             
         try:
+            logger.debug(f"Recieved command: skipto {index}, current nowplaying = {ctx.voice_state.nowplaying_index}")
             await ctx.voice_state.skip_to_song(index)
         except IndexError:
             return await self.send_error_embed(ctx, f"Please check the index.")
@@ -223,24 +224,33 @@ class Music(commands.Cog):
             await ctx.message.add_reaction('⏭')
         
     @commands.command(name='queue', aliases=['q', 'playlist', 'list'])
-    async def _queue(self, ctx: commands.Context, *, page: int = 1):
+    async def _queue(self, ctx: commands.Context, page: int = 0):
         """Show the player's queue. 
         Can specify page to view. 10 entries per page"""
         
-        if ctx.voice_state.queue_empty:
-            return await self.send_info_embed(ctx, f"The queue is empty.")
-            
+        if ctx.voice_state.playlist_empty:
+            return await self.send_info_embed(ctx, f"The playlist is empty.")
+        
+        playlist_len = len(ctx.voice_state.playlist[:])
         items_per_page = 10
-        pages = math.ceil(len(ctx.voice_state.songs)/items_per_page)
+        pages = math.ceil(playlist_len/items_per_page)
+        
+        nowplaying_index = ctx.voice_state.nowplaying_index
+        logger.debug(f"Request for playlist page: {page}")
+        page = math.ceil(nowplaying_index/items_per_page) if page == 0 else page
+        logger.debug(f"Sending playlist page: {page}")
         
         start = (page - 1) * items_per_page
         end = start + items_per_page
         
         queue = ''
-        for i, song in enumerate(ctx.voice_state.songs[start:end], start = start):
-            queue += f"`{i+1}.` [{song.title}]({song.url})\n"
+        for i, song in enumerate(ctx.voice_state.playlist[start:end], start = start):
+            if i == nowplaying_index - 1:
+                queue += f"`{i+1}.` \N{Headphone} [{song.title}]({song.url})\n"
+            else:
+                queue += f"`{i+1}.` [{song.title}]({song.url})\n"
             
-        embed = discord.Embed(description = f"**{len(ctx.voice_state.songs)} upcoming tracks:**\n\n{queue}", 
+        embed = discord.Embed(description = f"**{playlist_len - nowplaying_index} upcoming tracks:**\n\n{queue}", 
                                color = discord.Color.blurple()).set_footer(text = f"Viewing page {page}/{pages}")
         await ctx.send(embed = embed, delete_after = info_message_lifetime)
     
@@ -293,8 +303,8 @@ class Music(commands.Cog):
         
         if not ctx.voice_state.is_loaded:
             return await self.send_info_embed(ctx, f"Nothing is playing right now.")
-        elif ctx.voice_state.queue_empty:
-            return await self.send_info_embed(ctx, f"The queue is empty.")
+        elif ctx.voice_state.upcoming_empty:
+            return await self.send_info_embed(ctx, f"There are no upcoming songs.")
         
         _embed = await ctx.voice_state.next_info_embed()
         await ctx.send(embed = _embed, delete_after = info_message_lifetime)
@@ -303,8 +313,8 @@ class Music(commands.Cog):
     async def _shuffle(self, ctx: commands.Context):
         """Shuffles the queue"""
 
-        if ctx.voice_state.queue_empty:
-            return await self.send_info_embed(ctx, f"The queue is empty.")
+        if ctx.voice_state.playlist_empty:
+            return await self.send_info_embed(ctx, f"The playlist is empty.")
 
         ctx.voice_state.shuffle_queue()
         await ctx.message.add_reaction('\N{Twisted Rightwards Arrows}')
@@ -313,8 +323,8 @@ class Music(commands.Cog):
     async def _remove(self, ctx: commands.Context, index: str = None):
         """Removes a song from the queue at a given index or from a user"""
 
-        if ctx.voice_state.queue_empty:
-            return await self.send_info_embed(ctx, f"The queue is empty.")
+        if ctx.voice_state.playlist_empty:
+            return await self.send_info_embed(ctx, f"The playlist is empty.")
         
         if index == None:
             return await self.send_error_embed(ctx, f"Please provide a song to remove.")
@@ -345,8 +355,8 @@ class Music(commands.Cog):
     async def _remove_dupes(self, ctx: commands.Context):
         """Removes duplicate songs from the queue"""
 
-        if ctx.voice_state.queue_empty:
-            return await self.send_info_embed(ctx, f"The queue is empty.")
+        if ctx.voice_state.playlist_empty:
+            return await self.send_info_embed(ctx, f"The playlist is empty.")
         
         try:
             count = await ctx.voice_state.remove_dupes()
@@ -358,8 +368,8 @@ class Music(commands.Cog):
     async def _remove_absent(self, ctx: commands.Context):
         """Removes songs requested by absent users"""
 
-        if ctx.voice_state.queue_empty:
-            return await self.send_info_embed(ctx, f"The queue is empty.")
+        if ctx.voice_state.playlist_empty:
+            return await self.send_info_embed(ctx, f"The playlist is empty.")
         
         try:
             present_members = ctx.voice_state.voice.channel.voice_states.keys()
@@ -378,11 +388,11 @@ class Music(commands.Cog):
     async def _move(self, ctx: commands.Context, old_index: int, new_index: int):
         """Moves a song in queue to a given index"""
 
-        if ctx.voice_state.queue_empty:
-            return await self.send_info_embed(ctx, f"The queue is empty.")
+        if ctx.voice_state.playlist_empty:
+            return await self.send_info_embed(ctx, f"The playlist is empty.")
             
         try:
-            ctx.voice_state.move_song(old_index, new_index)
+            await ctx.voice_state.move_song(old_index, new_index)
         except IndexError:
             return await self.send_error_embed(ctx, f"Please check the index.")
         else:

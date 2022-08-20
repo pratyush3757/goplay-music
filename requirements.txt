@@ -7,6 +7,7 @@ certifi==2022.5.18.1
 cffi==1.15.0
 charset-normalizer==2.0.12
 git+https://github.com/Rapptz/discord.py.git@master#egg=discord.py[voice]
+ffmpeg==1.4
 frozenlist==1.3.0
 idna==3.3
 multidict==6.0.2
