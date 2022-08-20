@@ -41,11 +41,19 @@ class Music(commands.Cog):
     
     def cog_unload(self):
         for state in self.voice_states.values():
-            self.bot.loop.create_task(state.stop())
+            self.bot.loop.create_task(state.cancel_task_and_disconnect())
             
     def cog_check(self, ctx: commands.Context):
+        """Check before invoking any command from the cog"""
+        logger.debug(f"Received command from {ctx.author} in {ctx.channel}: {ctx.message.content}")
         if not ctx.guild:
             raise commands.NoPrivateMessage()
+        
+        state = self.voice_states.get(ctx.guild.id)
+        
+        # Check for any command used before join,play,playtop. Prevents unnecessary player initialization.
+        if not ((state is not None) or (ctx.command.name in ['join', 'play', 'playtop'])):
+            return False
         
         return True
     
@@ -55,8 +63,7 @@ class Music(commands.Cog):
     async def cog_command_error(self, ctx: commands.Context, error: commands.CommandError):
         """Cog command errors handler"""
         # This prevents any commands with local handlers being handled here in on_command_error.
-        logger.error(f"[Music Cog] Command error: {str(error)}", exc_info = True)
-        if hasattr(ctx.command, 'on_error'):
+        if ctx.command.has_error_handler():
             return
         
         ignored = (commands.CommandNotFound, )
@@ -71,7 +78,13 @@ class Music(commands.Cog):
                 await ctx.author.send(embed = embed, delete_after = error_message_lifetime)
             except discord.HTTPException:
                 pass
+        elif isinstance(error, commands.CheckFailure):
+            logger.debug(f"[Music Cog] Command error: Command used before playing songs. {str(error)}")
+            await self.send_error_embed(ctx, 
+                                        title = "Command Error", 
+                                        description = f"Please use play, playtop or join commands before using this command.")
         else:
+            logger.error(f"[Music Cog] Command error: {str(error)}", exc_info = True)
             self.error_count += 1
             additional_info = ""
             if self.error_count >= 3:
@@ -84,7 +97,7 @@ class Music(commands.Cog):
     
     async def cleanup(self, ctx, guild):
         try:
-            await ctx.voice_state.stop()
+            await ctx.voice_state.cancel_task_and_disconnect()
             await self.send_error_embed(ctx, title = f"Player Timeout",
                                         description = f"The player has timed out due to being idle.\nLeaving the voice channel.",
                                         lifetime = None)
@@ -112,7 +125,17 @@ class Music(commands.Cog):
                                color =  discord.Color.red())
         await ctx.send(embed = _embed, delete_after = lifetime)
         
+    async def ensure_voice(ctx: commands.Context):
+        """Ensures that user is connected to a voice channel"""
+        
+        if not ctx.author.voice or not ctx.author.voice.channel:
+            #await self.send_error_embed(ctx, f"Please join a voice channel!")
+            return False
+        
+        return True
+        
     @commands.command(name='join', aliases=['j'])
+    @commands.check(ensure_voice)
     async def _join(self, ctx: commands.Context):
         """Joins a voice channel"""
         
@@ -135,7 +158,7 @@ class Music(commands.Cog):
         if not ctx.voice_state.voice:
             return await self.send_error_embed(ctx, f"Bot not connected to any voice channel.")
             
-        await ctx.voice_state.stop()
+        await ctx.voice_state.cancel_task_and_disconnect()
         del self.voice_states[ctx.guild.id]
         
     @commands.command(name='embeds')
@@ -197,7 +220,7 @@ class Music(commands.Cog):
             return await self.send_info_embed(ctx, f"Nothing is playing right now.")
             
         try:
-            logger.debug(f"Recieved command: skipto {index}, current nowplaying = {ctx.voice_state.nowplaying_index}")
+            logger.debug(f"Skipto: current nowplaying = {ctx.voice_state.nowplaying_index}")
             await ctx.voice_state.skip_to_song(index)
         except IndexError:
             return await self.send_error_embed(ctx, f"Please check the index.")
@@ -399,6 +422,7 @@ class Music(commands.Cog):
             await ctx.message.add_reaction('\N{Up Down Arrow}')
 
     @commands.command(name='play', aliases=['p'])
+    @commands.check(ensure_voice)
     async def _play(self, ctx: commands.Context, *, search: str, pushTopFlag: bool = False):
         """Plays music from given url or search string"""
 
@@ -422,10 +446,11 @@ class Music(commands.Cog):
                     await self.send_info_embed(ctx, f"Enqueued {str(source)}")
                 elif isinstance(source, list):
                     await self.send_info_embed(ctx, f"Enqueued {len(source)} songs.")
-                    
+        
         await ctx.voice_state.push_entry(source, pushTopFlag = pushTopFlag)
         
     @commands.command(name='playtop', aliases=['pt'])
+    @commands.check(ensure_voice)
     async def _playtop(self, ctx: commands.Context, *, search: str):
         """Adds a given song to top of the queue"""
         
@@ -441,22 +466,25 @@ class Music(commands.Cog):
     
     @_play.error
     @_playtop.error
+    @_join.error
     async def play_handler(self, ctx: commands.Context, error: commands.CommandError):
         """Error handler for play and playtop commands"""
         
         if isinstance(error, commands.MissingRequiredArgument):
+            logger.debug(f"[Music Cog] Command error: {str(error)}")
             if error.param.name == 'search':
                 await self.send_error_embed(ctx, f"Please provide the link or search term to play song from.")
-    
-    @_join.before_invoke
-    @_play.before_invoke
-    @_playtop.before_invoke
-    async def ensure_voice(self, ctx: commands.Context):
-        """Ensures that user is connected to a voice channel"""
         
-        if not ctx.author.voice or not ctx.author.voice.channel:
+        elif isinstance(error, commands.CheckFailure):
+            logger.debug(f"[Music Cog] Command error: {str(error)}")
             await self.send_error_embed(ctx, f"Please join a voice channel!")
-            return False
+            
+        else:
+            logger.error(f"[Music Cog] Command error: {str(error)}", exc_info = True)
+            await self.send_error_embed(ctx,
+                                        title = "Command Error",
+                                        description = f"There has been an error.\nPlease ping the maintainer to look into this.")
+            
     
 async def setup(bot):
     await bot.add_cog(Music(bot))

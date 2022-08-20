@@ -331,8 +331,8 @@ class VoiceState:
         #self.audio_player = ctx.bot.loop.create_task(self.audio_player_task())
         self.audio_player = self.audio_player_task.start()
         
-    def __del__(self):
-        self.audio_player_task.cancel()
+    #def __del__(self):
+        #self.audio_player_task.cancel()
         
     @property
     def bufferflag(self):
@@ -550,7 +550,8 @@ class VoiceState:
         await asyncio.sleep(1)
         self.audio_player_task.start()
     
-    async def stop(self):
+    async def cancel_task_and_disconnect(self):
+        self.audio_player_task.cancel()
         self.clear_queue()
         
         if self.voice:
