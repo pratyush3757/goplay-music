@@ -23,7 +23,7 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 
 
-initialExtensions = ['cogs.music.music', 'cogs.basics']
+initialExtensions = ['cogs.music.music', 'cogs.basics', 'cogs.gpca']
 
 with open("txts/token.txt","r") as f:
     token = f.read()
